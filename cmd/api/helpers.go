@@ -1,47 +1,52 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 
+	"github.com/OpenConnectOUSL/backend-api-v1/internal/utils"
+	"github.com/google/uuid"
 	"github.com/julienschmidt/httprouter"
 )
 
 type envelope map[string]any
 
-func (app *application) readIDParam(r *http.Request) (int64, error) {
+func (app *application) readIDParam(r *http.Request) (uuid.UUID, error) {
 	params := httprouter.ParamsFromContext(r.Context())
 
-	id, err := strconv.ParseInt(params.ByName("id"), 10, 64)
-	if err != nil || id < 1 {
-		return 0, errors.New("invalid id parameter")
+	idStr:= params.ByName("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return uuid.Nil, errors.New("invalid id parameter")
 	}
 	return id, nil
 }
 
 func (app *application) writeJSON(w http.ResponseWriter, status int, data envelope, headers http.Header) error {
-	js, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
+    js, err := json.Marshal(data)
+    if err != nil {
+        return err
+    }
+    js = append(js, '\n')
 
-	js = append(js, '\n')
+    for key, value := range headers {
+        w.Header()[key] = value
+    }
+    w.Header().Set("Content-Type", "application/json")
 
-	for key, value := range headers {
-		w.Header()[key] = value
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(js)
+    // Use http.StatusText to get the status text for the given status code
+    w.Header().Set("Status", http.StatusText(status))
 
-	return nil
+    _, err = w.Write(js)
+    return err
 }
 
 func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -94,16 +99,46 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any
 	return nil
 }
 
-func savePDFFile(pdfFile multipart.File, pdfPath string) error {
-	newPdfFile, err := os.Create(pdfPath)
-	if err != nil {
-		return errors.New("cannot create PDF file")
-	}
-	defer newPdfFile.Close()
-
-	_, err = io.Copy(newPdfFile, pdfFile)
-	if err != nil {
-		return errors.New("cannot save PDF file")
-	}
-	return nil
+func (app *application) isPDF (data []byte) bool {
+	return bytes.HasPrefix(data, []byte("%PDF-"))
 }
+
+func (app *application) processAndSavePDF(inputBase64 string, w http.ResponseWriter, r *http.Request) (string, error) {
+	pdfData, err := base64.StdEncoding.DecodeString(inputBase64)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return "no key", err
+	}
+
+	if !app.isPDF(pdfData) {
+		app.badRequestResponse(w, r, fmt.Errorf("invalid pdf file"))
+		return "no key", err
+	}
+
+	const maxPDFSize = 5 * 1024 * 1024
+	if len(pdfData) > maxPDFSize {
+		app.badRequestResponse(w, r, fmt.Errorf("pdf file size must be less than 5MB"))
+		return "no key", err
+	}
+
+	// save the pdf to a file
+	uploadsDir := "uploads"
+	err = os.MkdirAll(uploadsDir, 0755)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return "no key", err
+	}
+
+	// generate a random filename
+	unique := utils.GenerateUUID()
+	filenameWithId := unique + ".pdf"
+	pdfPath := filepath.Join(uploadsDir, filenameWithId)
+
+	err = os.WriteFile(pdfPath, pdfData, 0644)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return "no key", err
+	}
+	return unique, nil
+}
+
