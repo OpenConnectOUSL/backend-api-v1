@@ -190,6 +190,70 @@ func (i IdeaModel) Delete(id uuid.UUID) error {
 	return nil
 }
 
+func (i IdeaModel) Get(id uuid.UUID) (*Idea, error) {
+	// id should be a valid UUID
+
+	query := `SELECT id, created_at, updated_at, title, description, submitted_by, idea_source_id, category, tags, upvotes, downvotes, status, comments,  interested_users, version FROM ideas WHERE id = $1`
+
+	var idea Idea
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := i.DB.QueryRowContext(ctx,query, id).Scan(
+		&idea.ID,
+		&idea.CreatedAt,
+		&idea.UpdatedAt,
+		&idea.Title,
+		&idea.Description,
+		&idea.SubmittedBy,
+		&idea.Pdf,
+		&idea.Category,
+		pq.Array(&idea.Tags),
+		&idea.Upvotes,
+		&idea.Downvotes,
+		&idea.Status,
+		pq.Array(&idea.Comments),
+		pq.Array(&idea.InterestedUsers),
+		&idea.Version,
+	)
+
+	if err != nil {
+		switch {
+			case errors.Is(err, sql.ErrNoRows):
+				return nil, ErrRecordNotFound
+			default:
+				return nil, err
+		}
+	}
+
+	return &idea, nil
+	
+}
+
+func (i IdeaModel) Delete(id uuid.UUID) error {
+	query := `DELETE FROM ideas WHERE id = $1`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := i.DB.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrRecordNotFound
+	}
+
+	return nil
+}
+
 
 
 func (i IdeaModel) GetAllIdeas(title string, tags []string, filters Filters)([]*Idea, error) {
