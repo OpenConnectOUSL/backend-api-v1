@@ -104,3 +104,4 @@ func openDB(cfg config) (*sql.DB, error) {
 
 	return db, nil
 }
+}
