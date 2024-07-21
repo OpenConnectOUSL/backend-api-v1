@@ -112,7 +112,9 @@ func (app *application) processAndSavePDF(inputBase64 string, w http.ResponseWri
 	pdfData, err := base64.StdEncoding.DecodeString(inputBase64)
 	if err != nil {
 		app.badRequestResponse(w, r, err)
-		return "no key", err	}
+		return "no key", err
+	}
+
 
 	if !app.isPDF(pdfData) {
 		app.badRequestResponse(w, r, fmt.Errorf("invalid pdf file"))
@@ -124,16 +126,9 @@ func (app *application) processAndSavePDF(inputBase64 string, w http.ResponseWri
 		app.badRequestResponse(w, r, fmt.Errorf("pdf file size must be less than 5MB"))
 		return "no key", err
 	}
-	}
 
 	if !app.isPDF(pdfData) {
 		app.badRequestResponse(w, r, fmt.Errorf("invalid pdf file"))
-		return "no key", err
-	}
-
-	const maxPDFSize = 5 * 1024 * 1024
-	if len(pdfData) > maxPDFSize {
-		app.badRequestResponse(w, r, fmt.Errorf("pdf file size must be less than 5MB"))
 		return "no key", err
 	}
 

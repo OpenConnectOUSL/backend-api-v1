@@ -78,6 +78,40 @@ func (app *application) createIdeaHandler(w http.ResponseWriter, r *http.Request
  		app.serverErrorResponse(w, r, err)
  	}
 
+
+	idea := &data.Idea{
+		Title:       input.Title,
+		Description: input.Description,
+		Pdf:         uniqueID,
+		Category:    input.Category,
+		Tags:        input.Tags,
+		SubmittedBy: submittedBy,
+	}
+
+	v := validator.New()
+
+	if data.ValidateIdea(v, idea); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	err = app.models.Ideas.Insert(idea)
+ 	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+ 	}
+
+ 	headers := make(http.Header)
+ 	headers.Set("Location", fmt.Sprintf("/v1/ideas/%d", idea.ID))
+ 	// Save the idea to the database or perform other necessary operations
+// 	// ...
+
+	err = app.writeJSON(w, http.StatusCreated, envelope{"idea": idea}, headers)
+
+ 	if err != nil {
+ 		app.serverErrorResponse(w, r, err)
+ 	}
+
  	fmt.Fprintf(w, "%v\n", "Idea submitted successfully")
 
 }
@@ -311,6 +345,7 @@ func (app *application) updateIdeaHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// fmt.Println(idea.Pdf)
+
 	if input.Title != nil {
 		idea.Title = *input.Title
 	}
@@ -376,6 +411,7 @@ func (app *application) updateIdeaHandler(w http.ResponseWriter, r *http.Request
 
 */
 
+
 func (app *application) deleteIdeaHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := app.readIDParam(r)
@@ -397,6 +433,29 @@ func (app *application) deleteIdeaHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	err = app.writeJSON(w, http.StatusOK, envelope{"message": "idea deleted successfully"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+func (app *application) updateIdeaHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := app.readIDParam(r)
+	if err != nil {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	idea, err := app.models.Ideas.Get(id)
+	if err != nil {
+		switch {
+			case errors.Is(err, data.ErrRecordNotFound):
+				app.notFoundResponse(w, r)
+			default:
+				app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	err = app.writeJSON(w, http.StatusOK, envelope{"idea": idea}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
@@ -506,6 +565,48 @@ func (app *application) deleteIdeaHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	err = app.writeJSON(w, http.StatusOK, envelope{"message": "idea deleted successfully"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+func (app *application) listIdeasHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Title string
+		Category string
+		Tags []string
+		data.Filters
+	}
+
+	v := validator.New()
+
+	qs := r.URL.Query()
+
+	input.Title = app.readString(qs, "title", "")
+	input.Category = app.readString(qs, "category", "")
+	input.Tags = app.readCSV(qs, "tags", []string{})
+
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+
+	input.Filters.Sort = app.readString(qs, "sort", "id")
+
+	input.Filters.SortSafelist = []string{"id", "title", "category", "-id", "-title", "-category"}
+
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	ideas, err := app.models.Ideas.GetAllIdeas(input.Title, input.Tags, input.Filters)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusOK, envelope{"ideas": ideas}, nil)
+
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
