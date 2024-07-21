@@ -8,11 +8,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/OpenConnectOUSL/backend-api-v1/internal/utils"
+	"github.com/OpenConnectOUSL/backend-api-v1/internal/validator"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/julienschmidt/httprouter"
 )
@@ -107,7 +112,18 @@ func (app *application) processAndSavePDF(inputBase64 string, w http.ResponseWri
 	pdfData, err := base64.StdEncoding.DecodeString(inputBase64)
 	if err != nil {
 		app.badRequestResponse(w, r, err)
+		return "no key", err	}
+
+	if !app.isPDF(pdfData) {
+		app.badRequestResponse(w, r, fmt.Errorf("invalid pdf file"))
 		return "no key", err
+	}
+
+	const maxPDFSize = 5 * 1024 * 1024
+	if len(pdfData) > maxPDFSize {
+		app.badRequestResponse(w, r, fmt.Errorf("pdf file size must be less than 5MB"))
+		return "no key", err
+	}
 	}
 
 	if !app.isPDF(pdfData) {
@@ -142,3 +158,37 @@ func (app *application) processAndSavePDF(inputBase64 string, w http.ResponseWri
 	return unique, nil
 }
 
+func (app *application) readString(qs url.Values, key string, defaultValue string) string {
+	s := qs.Get(key)
+
+	if s == "" {
+		return defaultValue
+	}
+
+	return s
+}
+
+func (app *application) readCSV(qs url.Values, key string, defaultValue []string) []string {
+	csv := qs.Get(key)
+
+	if csv == "" {
+		return defaultValue
+	}
+
+	return strings.Split(csv, ",")
+}
+
+func (app *application) readInt(qs url.Values, key string, defaultValue int, v *validator.Validator) int {
+	s := qs.Get(key)
+
+	if s == "" {
+		return defaultValue
+	}
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		v.AddError(key, "must be an integer")
+		return defaultValue
+	}
+	
+	return i
+}
